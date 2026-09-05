@@ -1,14 +1,14 @@
 // AnimeForge AI — Prisma schema
-// Default datasource is SQLite for a zero-setup local demo. For production,
-// change provider to "postgresql" (or "mysql") and set DATABASE_URL
-// accordingly, then run `npm run db:migrate`.
+// Datasource is PostgreSQL. Set DATABASE_URL to a Postgres connection string
+// (Neon, Supabase, Vercel Postgres, RDS, or a local Postgres). Schema is kept
+// in sync with `prisma db push` (run automatically in the deploy build).
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

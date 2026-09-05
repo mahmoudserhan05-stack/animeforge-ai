@@ -46,7 +46,7 @@ export function serializeScene(scene: Scene): SceneDTO {
     location: scene.location,
     dialogue: scene.dialogue,
     imagePrompt: scene.imagePrompt,
-    imageStatus: scene.imageStatus,
+    imageStatus: scene.imageStatus as SceneDTO["imageStatus"],
     imageUrl: scene.imageUrl,
   };
 }
@@ -68,7 +68,7 @@ export function serializeProject(
     id: project.id,
     title: project.title,
     idea: project.idea,
-    status: project.status,
+    status: project.status as ProjectDTO["status"],
     currentStep: project.currentStep,
     durationSeconds: project.durationSeconds,
     aspectRatio: project.aspectRatio as ProjectDTO["aspectRatio"],
@@ -93,7 +93,7 @@ export function serializeProjectSummary(
     id: project.id,
     title: project.title,
     idea: project.idea,
-    status: project.status,
+    status: project.status as ProjectSummaryDTO["status"],
     currentStep: project.currentStep,
     aspectRatio: project.aspectRatio as ProjectDTO["aspectRatio"],
     updatedAt: project.updatedAt.toISOString(),
