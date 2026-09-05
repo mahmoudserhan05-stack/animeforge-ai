@@ -1,0 +1,163 @@
+// AnimeForge AI — Prisma schema
+// Default datasource is SQLite for a zero-setup local demo. For production,
+// change provider to "postgresql" (or "mysql") and set DATABASE_URL
+// accordingly, then run `npm run db:migrate`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Users & auth
+// ────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  passwordHash  String
+  image         String?
+  plan          String    @default("FREE") // "FREE" | "CREATOR" | "STUDIO"
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  projects      Project[]
+  transactions  CreditTransaction[]
+
+  @@index([email])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Projects — one project = one anime short being produced through the wizard
+// ────────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title           String
+  idea            String        // the original one-line idea the user typed
+  status          String        @default("DRAFT") // DRAFT | SCRIPT_READY | SCENES_READY | RENDERING | COMPLETED | FAILED
+  currentStep     Int           @default(1) // 1..8, mirrors the wizard UI
+
+  // Step 2 options
+  durationSeconds Int           @default(30) // 15 | 30 | 60
+  aspectRatio     String        @default("9:16") // "9:16" | "16:9" | "1:1"
+  animeStyle      String        @default("shonen-action")
+  language        String        @default("ar")
+  voiceId         String        @default("aria")
+
+  // Step 3 output (editable by the user)
+  script          String?
+
+  musicMood       String?       // selected in step 6
+  sfxEnabled      Boolean       @default(true)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  scenes          Scene[]
+  assets          GeneratedAsset[]
+  video           Video?
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Scenes — the script broken down into shootable beats
+// ────────────────────────────────────────────────────────────────────────────
+
+model Scene {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  order        Int              // 1-based scene number
+  description  String           // what happens in the scene
+  character    String?
+  location     String?
+  dialogue     String?
+  imagePrompt  String           // visual prompt used for image generation
+
+  imageStatus  String   @default("PENDING") // PENDING | GENERATING | READY | FAILED
+  imageUrl     String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assets       GeneratedAsset[]
+
+  @@index([projectId])
+  @@unique([projectId, order])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Generated assets — every AI-produced artifact (image, voice line, sfx…)
+// kept as an auditable record, independent of what currently sits on Scene.
+// ────────────────────────────────────────────────────────────────────────────
+
+model GeneratedAsset {
+  id         String     @id @default(cuid())
+  projectId  String
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sceneId    String?
+  scene      Scene?     @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  type       String     // IMAGE | VOICE | MUSIC | SFX | VIDEO
+  provider   String     // "mock" | "openai" | "elevenlabs" | ...
+  url        String
+  metadata   String?    // JSON-serialized extra info (prompt, voice, duration…)
+  status     String     @default("READY") // PENDING | GENERATING | READY | FAILED
+
+  creditsSpent Int      @default(0)
+
+  createdAt  DateTime   @default(now())
+
+  @@index([projectId])
+  @@index([sceneId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Final rendered video
+// ────────────────────────────────────────────────────────────────────────────
+
+model Video {
+  id          String      @id @default(cuid())
+  projectId   String      @unique
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  url         String
+  thumbnailUrl String?
+  durationSeconds Int
+  aspectRatio String
+  provider    String      @default("mock")
+  status      String      @default("READY") // PENDING | GENERATING | READY | FAILED
+
+  createdAt   DateTime    @default(now())
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Credits ledger — every AI operation is a signed transaction; balance is the
+// running sum, never a mutable counter, so it stays auditable.
+// ────────────────────────────────────────────────────────────────────────────
+
+model CreditTransaction {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount     Int       // negative = spend, positive = grant/purchase
+  reason     String    // e.g. "script_generation", "signup_bonus", "image_generation"
+  projectId  String?
+
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+}

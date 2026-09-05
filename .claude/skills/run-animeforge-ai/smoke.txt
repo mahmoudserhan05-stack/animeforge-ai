@@ -1,0 +1,33 @@
+# AnimeForge AI end-to-end smoke: sign in with the seeded demo account,
+# create a project, walk the wizard to Options, generate a script with the
+# built-in mock AI provider (no API keys, no cost).
+#
+# Run:  node .claude/skills/run-animeforge-ai/driver.mjs .claude/skills/run-animeforge-ai/smoke.txt
+# Screenshots -> .claude/skills/run-animeforge-ai/shots/  (override with SHOTS_DIR)
+#
+# Each `nav` starts from a clean tab; only cookies persist between driver runs,
+# so this script is self-contained from the sign-in step.
+
+nav /sign-in
+wait #email
+fill #email demo@animeforge.ai
+fill #password demo1234
+click button[type="submit"]
+wait-text أحدث المشاريع
+sleep 600
+screenshot 01-dashboard.png
+
+nav /dashboard/projects/new
+wait textarea
+fill textarea A neon samurai duels a thunder oni on a Tokyo rooftop at midnight
+click-text متابعة إلى خيارات الفيديو
+wait-text فكرة الفيديو
+click-text متابعة إلى الخيارات
+wait-text أسلوب الأنمي
+screenshot 02-options.png
+
+click-text إنشاء السيناريو
+wait-text عدّل السيناريو
+url
+screenshot 03-script.png
+assert-no-errors
