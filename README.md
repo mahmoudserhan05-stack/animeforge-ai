@@ -1,5 +1,7 @@
 # AnimeForge AI
 
+**Live demo:** https://animeforge-ai-red.vercel.app · demo login `demo@animeforge.ai` / `demo1234`
+
 **Turn a one-line idea into a short, original-style anime video.** Script → Scenes → Images → Voice → Music → Final video, ready for TikTok, YouTube Shorts and Instagram Reels.
 
 This is a full, working product scaffold — not a static mockup. Every screen is wired to a real Next.js backend, a real database, and a real (swappable) AI abstraction layer. It runs completely **offline in Demo Mode** with zero API keys, so you can try the entire flow today, then flip in real AI provider keys later without touching any UI code.
