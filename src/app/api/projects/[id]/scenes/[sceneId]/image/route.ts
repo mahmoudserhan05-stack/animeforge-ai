@@ -6,6 +6,10 @@ import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
 
+// Real image generation (Kie.ai nano-banana) is an async job we poll for
+// ~30s. Give the function room; 60s is the Vercel Hobby ceiling.
+export const maxDuration = 60;
+
 /** POST /api/projects/:id/scenes/:sceneId/image — generate this scene's image. */
 export async function POST(
   _req: NextRequest,
