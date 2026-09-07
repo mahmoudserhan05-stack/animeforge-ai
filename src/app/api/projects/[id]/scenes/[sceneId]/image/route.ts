@@ -5,6 +5,7 @@ import { jsonError, handleRouteError, serializeScene } from "@/lib/api-utils";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
+import { persistRemoteFile } from "@/lib/storage";
 
 // Real image generation (Kie.ai nano-banana) is an async job we poll for
 // ~30s. Give the function room; 60s is the Vercel Hobby ceiling.
@@ -40,14 +41,30 @@ export async function POST(
 
     await prisma.scene.update({ where: { id: scene.id }, data: { imageStatus: "GENERATING" } });
 
+    // Anchor character/style to the project's first finished scene image so the
+    // cast stays consistent shot to shot (skipped for that first image itself).
+    const anchor = await prisma.scene.findFirst({
+      where: {
+        projectId: project.id,
+        imageStatus: "READY",
+        imageUrl: { not: null },
+        id: { not: scene.id },
+      },
+      orderBy: { order: "asc" },
+    });
+
     const ai = getAIService();
     try {
-      const { url, provider } = await ai.generateImage({
+      const gen = await ai.generateImage({
         imagePrompt: scene.imagePrompt,
         animeStyle: project.animeStyle,
         aspectRatio: project.aspectRatio as "9:16" | "16:9" | "1:1",
         seed: scene.id,
+        referenceImageUrls: anchor?.imageUrl ? [anchor.imageUrl] : undefined,
       });
+      const provider = gen.provider;
+      // Re-host off the provider's short-lived CDN onto Vercel Blob.
+      const url = await persistRemoteFile(gen.url, `projects/${project.id}/scene-${scene.order}`);
 
       const [updatedScene] = await prisma.$transaction([
         prisma.scene.update({

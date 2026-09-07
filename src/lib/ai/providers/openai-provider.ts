@@ -183,16 +183,32 @@ export class RealAIProvider implements AIService {
     if (!baseUrl || !key) {
       throw new Error("Image generation isn't configured — set IMAGE_API_BASE_URL and IMAGE_API_KEY.");
     }
-    const model = process.env.IMAGE_MODEL || "google/nano-banana";
-    const prompt =
-      `${input.animeStyle} anime style, original characters and designs (nothing copyrighted), ` +
-      `cinematic lighting, ${input.aspectRatio} vertical frame. Scene: ${input.imagePrompt}`;
+    // Seedream v4: ~15s (vs nano-banana's 30-60s), honours image reference for
+    // character consistency, no watermark.
+    const model = process.env.IMAGE_MODEL || "bytedance/seedream-v4-text-to-image";
+    const refs = input.referenceImageUrls?.filter(Boolean) ?? [];
 
-    const url = await this.kieJob(baseUrl, key, model, {
+    const imageSize =
+      input.aspectRatio === "16:9"
+        ? "landscape_16_9"
+        : input.aspectRatio === "1:1"
+          ? "square_hd"
+          : "portrait_16_9";
+
+    const prompt = refs.length
+      ? `Keep the SAME character(s), face, outfit and art style as the reference image. ` +
+        `New shot: ${input.imagePrompt}`
+      : `${input.animeStyle} anime style, original characters and designs (nothing copyrighted), ` +
+        `cinematic lighting. Scene: ${input.imagePrompt}`;
+
+    const jobInput: Record<string, unknown> = {
       prompt,
       output_format: "png",
-      aspect_ratio: input.aspectRatio,
-    });
+      image_size: imageSize,
+    };
+    if (refs.length) jobInput.image_urls = refs;
+
+    const url = await this.kieJob(baseUrl, key, model, jobInput);
     return { url, provider: `kie:${model}` };
   }
 

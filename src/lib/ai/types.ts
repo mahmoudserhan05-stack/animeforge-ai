@@ -50,6 +50,8 @@ export type GenerateImageInput = {
   animeStyle: string;
   aspectRatio: WizardOptions["aspectRatio"];
   seed?: string;
+  /** Earlier scene image(s) to anchor character/style consistency (image-to-image). */
+  referenceImageUrls?: string[];
 };
 
 export type GenerateImageResult = {
