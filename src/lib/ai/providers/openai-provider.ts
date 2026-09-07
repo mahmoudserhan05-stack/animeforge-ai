@@ -127,16 +127,41 @@ export class RealAIProvider implements AIService {
 
   /**
    * Kie.ai async jobs API (https://api.kie.ai): POST a task, poll recordInfo
-   * until it's done, return the first result URL. Kept generic so the same
-   * shape works for image / audio / video models — only `model` + `input`
-   * change. `timeoutMs` must stay under the calling route's maxDuration.
+   * until it's done, return the first result URL. Generic — the same shape
+   * works for image / audio / video, only `model` + `input` change.
+   *
+   * `budgetMs` is the total wall-clock budget and must stay under the calling
+   * route's maxDuration. Kie occasionally returns a transient "Internal Error"
+   * failure; we retry once if there's enough budget left.
    */
   private async kieJob(
     baseUrl: string,
     key: string,
     model: string,
     input: Record<string, unknown>,
-    timeoutMs = 55_000,
+    budgetMs = 55_000,
+  ): Promise<string> {
+    const start = Date.now();
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const remaining = budgetMs - (Date.now() - start);
+      if (remaining < 12_000) break; // not enough time for another attempt
+      try {
+        return await this.kieJobOnce(baseUrl, key, model, input, remaining);
+      } catch (err) {
+        lastErr = err as Error;
+        if (!/internal error|try again|timed out/i.test(lastErr.message)) throw lastErr;
+      }
+    }
+    throw lastErr ?? new Error("Kie job failed");
+  }
+
+  private async kieJobOnce(
+    baseUrl: string,
+    key: string,
+    model: string,
+    input: Record<string, unknown>,
+    timeoutMs: number,
   ): Promise<string> {
     const root = baseUrl.replace(/\/+$/, "");
     const auth = { Authorization: `Bearer ${key}` };
@@ -212,15 +237,40 @@ export class RealAIProvider implements AIService {
     return { url, provider: `kie:${model}` };
   }
 
-  async generateVoice(_input: GenerateVoiceInput): Promise<GenerateVoiceResult> {
+  async generateVoice(input: GenerateVoiceInput): Promise<GenerateVoiceResult> {
     const baseUrl = process.env.VOICE_API_BASE_URL;
     const key = process.env.VOICE_API_KEY;
     if (!baseUrl || !key) {
-      throw new Error(
-        "Voice generation isn't configured yet — set VOICE_API_BASE_URL and VOICE_API_KEY, then wire the provider call here (Kie.ai: model elevenlabs/text-to-speech-turbo-2-5 via kieJob()).",
-      );
+      throw new Error("Voice generation isn't configured — set VOICE_API_BASE_URL and VOICE_API_KEY.");
     }
-    throw new Error("generateVoice: implement the provider call.");
+
+    // ElevenLabs multilingual turbo (handles Arabic + English). The app's voice
+    // ids map to real ElevenLabs public voices.
+    const VOICE_IDS: Record<string, string> = {
+      aria: "9BWtsMINqrJLrRacOk9x",
+      kenji: "nPczCjzI2devNBz1zQrb",
+      noor: "EXAVITQu4vr4xnSDxMaL",
+      leo: "IKne3meq5aSn9XLyUdCD",
+      maya: "21m00Tcm4TlvDq8ikWAM",
+    };
+    const voiceId = VOICE_IDS[input.voiceId] ?? "EkK5I93UQWFDigLMpZcX";
+    const model = process.env.VOICE_MODEL || "elevenlabs/text-to-speech-turbo-2-5";
+
+    const text = input.lines.map((l) => l.text).join("\n\n").slice(0, 5000);
+
+    const url = await this.kieJob(
+      baseUrl,
+      key,
+      model,
+      { text, voice: { voice_id: voiceId } },
+      50_000,
+    );
+
+    // No duration in the response — estimate from word count (~2.5 words/sec).
+    const words = text.split(/\s+/).filter(Boolean).length;
+    const durationSeconds = Math.max(3, Math.round(words / 2.5));
+
+    return { url, provider: `kie:${model}`, durationSeconds };
   }
 
   async generateVideo(_input: GenerateVideoInput): Promise<GenerateVideoResult> {

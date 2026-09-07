@@ -5,7 +5,10 @@ import { jsonError, handleRouteError, serializeProject, PROJECT_INCLUDE } from "
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
+import { persistRemoteFile } from "@/lib/storage";
 import { voiceOptionsSchema } from "@/lib/validations";
+
+export const maxDuration = 60;
 
 /** POST /api/projects/:id/voice — generate the voice-over + save music/SFX choices. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -46,11 +49,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .filter((s) => s.dialogue)
       .map((s) => ({ sceneOrder: s.order, text: s.dialogue as string }));
 
-    const { url, provider, durationSeconds } = await ai.generateVoice({
+    const gen = await ai.generateVoice({
       lines: lines.length > 0 ? lines : scenes.map((s) => ({ sceneOrder: s.order, text: s.description })),
       voiceId: parsed.data.voiceId,
       language: project.language,
     });
+    const { provider, durationSeconds } = gen;
+    // Re-host off the provider's short-lived CDN.
+    const url = await persistRemoteFile(gen.url, `projects/${project.id}/voice`);
 
     await prisma.$transaction([
       prisma.generatedAsset.create({
