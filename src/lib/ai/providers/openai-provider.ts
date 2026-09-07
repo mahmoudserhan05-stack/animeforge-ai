@@ -44,8 +44,14 @@ export class RealAIProvider implements AIService {
     return process.env.OPENAI_MODEL || "gpt-4o-mini";
   }
 
+  /** OpenAI-compatible chat endpoint. Override with OPENAI_BASE_URL to use a
+   *  gateway (Kie.ai, OpenRouter, Azure, a local server, ...). */
+  private get baseUrl() {
+    return (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  }
+
   private async chat(messages: { role: "system" | "user"; content: string }[]) {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -102,10 +108,16 @@ export class RealAIProvider implements AIService {
       { role: "user", content: script },
     ]);
 
+    // Some models wrap JSON in ```json fences or add stray prose — pull out the
+    // first {...} block before parsing.
+    const json = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    const match = json.match(/\{[\s\S]*\}/);
+
     let scenes: SceneDraft[];
     try {
-      const parsed = JSON.parse(content) as { scenes: SceneDraft[] };
+      const parsed = JSON.parse(match ? match[0] : json) as { scenes: SceneDraft[] };
       scenes = parsed.scenes;
+      if (!Array.isArray(scenes) || scenes.length === 0) throw new Error("no scenes");
     } catch {
       throw new Error("Failed to parse scene breakdown from AI response");
     }
