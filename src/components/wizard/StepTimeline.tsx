@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/Button";
 import { useCredits } from "@/components/dashboard/CreditsProvider";
 import { CREDIT_COSTS } from "@/lib/credit-costs";
+import { upload } from "@vercel/blob/client";
+import { assembleVideo, canAssembleVideo } from "@/lib/video-assembler";
 import type { ProjectDTO } from "@/types";
 
 export function StepTimeline({
@@ -18,25 +20,73 @@ export function StepTimeline({
 }) {
   const { refresh } = useCredits();
   const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
 
   const perScene = project.scenes.length > 0 ? project.durationSeconds / project.scenes.length : 0;
 
   async function handleGenerateVideo() {
     setGenerating(true);
+    setPhase("جارٍ التحضير…");
     try {
-      const res = await fetch(`/api/projects/${project.id}/video`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.code === "INSUFFICIENT_CREDITS" ? "لا يوجد رصيد كافٍ" : data.error);
+      // 1. Start: spend credits, mark rendering.
+      const startRes = await fetch(`/api/projects/${project.id}/video`, { method: "POST" });
+      const startData = await startRes.json();
+      if (!startRes.ok) {
+        toast.error(startData.code === "INSUFFICIENT_CREDITS" ? "لا يوجد رصيد كافٍ" : startData.error);
         return;
       }
       refresh();
-      toast.success("تم إنشاء الفيديو النهائي!");
-      onCompleted(data.project);
-    } catch {
-      toast.error("حدث خطأ غير متوقع");
+
+      // 2. Render. Assemble the slideshow in the browser, then upload it.
+      if (startData.needsClientRender && canAssembleVideo()) {
+        setPhase("جارٍ تركيب الفيديو… 0%");
+        const { blob, mimeType } = await assembleVideo({
+          imageUrls: project.scenes
+            .slice()
+            .sort((a, b) => a.order - b.order)
+            .map((s) => s.imageUrl!)
+            .filter(Boolean),
+          audioUrl: project.voiceUrl,
+          aspectRatio: project.aspectRatio,
+          durationSeconds: project.durationSeconds,
+          title: project.title,
+          onProgress: (f) => setPhase(`جارٍ تركيب الفيديو… ${Math.round(f * 100)}%`),
+        });
+
+        setPhase("جارٍ الرفع…");
+        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+        const uploaded = await upload(`projects/${project.id}/final-${Date.now()}.${ext}`, blob, {
+          access: "public",
+          contentType: mimeType,
+          handleUploadUrl: `/api/projects/${project.id}/video/upload`,
+        });
+
+        setPhase("جارٍ الحفظ…");
+        const putRes = await fetch(`/api/projects/${project.id}/video`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: uploaded.url }),
+        });
+        const putData = await putRes.json();
+        if (!putRes.ok) throw new Error(putData.error || "finalize failed");
+        toast.success("تم إنشاء الفيديو النهائي!");
+        onCompleted(putData.project);
+        return;
+      }
+
+      // 3. Browser can't record — fall back to the placeholder clip.
+      setPhase("جارٍ الإنهاء…");
+      const fbRes = await fetch(`/api/projects/${project.id}/video?fallback=1`, { method: "POST" });
+      const fbData = await fbRes.json();
+      if (!fbRes.ok) throw new Error(fbData.error || "fallback failed");
+      toast.message("متصفحك لا يدعم تركيب الفيديو — تم استخدام نسخة مبسّطة.");
+      onCompleted(fbData.project);
+    } catch (err) {
+      console.error(err);
+      toast.error("تعذّر إنشاء الفيديو. حاول مرة أخرى.");
     } finally {
       setGenerating(false);
+      setPhase(null);
     }
   }
 
@@ -87,6 +137,7 @@ export function StepTimeline({
         >
           إنشاء الفيديو النهائي ({CREDIT_COSTS.video_generation} رصيد)
         </Button>
+        {phase && <p className="mt-2 text-center text-xs text-muted">{phase}</p>}
       </CardContent>
     </Card>
   );

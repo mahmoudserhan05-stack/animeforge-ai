@@ -8,10 +8,12 @@ import { VideoPreviewPlayer } from "./VideoPreviewPlayer";
 import type { ProjectDTO } from "@/types";
 
 export function StepPreview({ project }: { project: ProjectDTO }) {
-  if (!project.video) {
+  if (!project.video || !project.video.url) {
     return (
       <Card>
-        <CardContent className="py-16 text-center text-muted">لم يتم إنشاء الفيديو بعد.</CardContent>
+        <CardContent className="py-16 text-center text-muted">
+          لم يكتمل إنشاء الفيديو. ارجع إلى خطوة «الخط الزمني» وأعد المحاولة.
+        </CardContent>
       </Card>
     );
   }
@@ -29,7 +31,12 @@ export function StepPreview({ project }: { project: ProjectDTO }) {
         <VideoPreviewPlayer src={project.video.url} poster={project.video.thumbnailUrl} aspectRatio={project.aspectRatio} />
 
         <div className="mx-auto mt-8 grid max-w-xs gap-3 sm:max-w-none sm:grid-cols-3">
-          <a href={project.video.url} download={`${project.title || "animeforge-video"}.mp4`}>
+          <a
+            href={project.video.url}
+            download={`${(project.title || "animeforge-video").slice(0, 60)}.${
+              project.video.url.split("?")[0].endsWith(".mp4") ? "mp4" : "webm"
+            }`}
+          >
             <Button variant="secondary" className="w-full" icon={<Download className="size-4" />}>
               تنزيل
             </Button>
