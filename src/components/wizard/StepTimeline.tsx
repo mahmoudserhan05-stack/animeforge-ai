@@ -54,10 +54,11 @@ export function StepTimeline({
         });
 
         setPhase("جارٍ الرفع…");
-        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+        const baseType = mimeType.split(";")[0]; // drop ";codecs=..."
+        const ext = baseType.includes("mp4") ? "mp4" : "webm";
         const uploaded = await upload(`projects/${project.id}/final-${Date.now()}.${ext}`, blob, {
           access: "public",
-          contentType: mimeType,
+          contentType: baseType,
           handleUploadUrl: `/api/projects/${project.id}/video/upload`,
         });
 
