@@ -87,7 +87,12 @@ export async function assembleVideo(input: AssembleInput): Promise<AssembleResul
   ctx.fillStyle = "#07070c";
   ctx.fillRect(0, 0, W, H);
 
-  const images = await Promise.all(imageUrls.map(loadImage));
+  const settled = await Promise.allSettled(imageUrls.map(loadImage));
+  const images = settled
+    .filter((r): r is PromiseFulfilledResult<HTMLImageElement> => r.status === "fulfilled")
+    .map((r) => r.value)
+    .filter((img) => img && img.width > 0 && img.height > 0);
+  if (images.length === 0) throw new Error("None of the scene images could be loaded.");
   onProgress?.(0.15);
 
   // Audio graph (optional).
@@ -138,32 +143,38 @@ export async function assembleVideo(input: AssembleInput): Promise<AssembleResul
   const start = performance.now();
 
   await new Promise<void>((resolve) => {
-    function frame(now: number) {
-      const elapsed = now - start;
-      if (elapsed >= totalMs) {
-        resolve();
-        return;
-      }
-      const idx = Math.min(images.length - 1, Math.floor(elapsed / perShot));
-      const local = elapsed - idx * perShot;
-      const t = local / perShot;
+    const tick = () => {
+      try {
+        const elapsed = performance.now() - start;
+        if (elapsed >= totalMs) {
+          resolve();
+          return;
+        }
+        const idx = Math.min(images.length - 1, Math.max(0, Math.floor(elapsed / perShot)));
+        const cur = images[idx];
+        const local = elapsed - idx * perShot;
+        const t = Math.min(1, local / perShot);
 
-      ctx.fillStyle = "#07070c";
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 1;
-      drawCover(ctx, images[idx], W, H, t, idx);
-
-      // crossfade into the next shot
-      if (idx < images.length - 1 && local > perShot - fade) {
-        ctx.globalAlpha = (local - (perShot - fade)) / fade;
-        drawCover(ctx, images[idx + 1], W, H, 0, idx + 1);
+        ctx.fillStyle = "#07070c";
+        ctx.fillRect(0, 0, W, H);
         ctx.globalAlpha = 1;
-      }
+        if (cur) drawCover(ctx, cur, W, H, t, idx);
 
-      onProgress?.(0.15 + 0.8 * (elapsed / totalMs));
-      requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
+        const next = images[idx + 1];
+        if (next && local > perShot - fade) {
+          ctx.globalAlpha = Math.min(1, (local - (perShot - fade)) / fade);
+          drawCover(ctx, next, W, H, 0, idx + 1);
+          ctx.globalAlpha = 1;
+        }
+
+        onProgress?.(0.15 + 0.8 * (elapsed / totalMs));
+      } catch {
+        // one bad frame shouldn't hang the whole render
+      }
+      // setTimeout, not rAF: rAF is throttled to ~0 in a background/headless tab.
+      setTimeout(tick, 1000 / fps);
+    };
+    tick();
   });
 
   recorder.stop();
