@@ -1,4 +1,5 @@
 import type { AIService } from "../AIService";
+import { MockAIProvider } from "./mock-provider";
 import type {
   GenerateScriptInput,
   GenerateScriptResult,
@@ -140,17 +141,19 @@ export class RealAIProvider implements AIService {
     model: string,
     input: Record<string, unknown>,
     budgetMs = 55_000,
+    perAttemptMs = budgetMs,
   ): Promise<string> {
     const start = Date.now();
     let lastErr: Error | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const remaining = budgetMs - (Date.now() - start);
-      if (remaining < 12_000) break; // not enough time for another attempt
+      if (remaining < 9_000) break; // not enough time for another attempt
       try {
-        return await this.kieJobOnce(baseUrl, key, model, input, remaining);
+        return await this.kieJobOnce(baseUrl, key, model, input, Math.min(remaining, perAttemptMs));
       } catch (err) {
         lastErr = err as Error;
-        if (!/internal error|try again|timed out/i.test(lastErr.message)) throw lastErr;
+        // Retry any failure while there's budget — Kie's TTS/image jobs fail
+        // transiently ("Internal Error, please try again") fairly often.
       }
     }
     throw lastErr ?? new Error("Kie job failed");
@@ -233,7 +236,7 @@ export class RealAIProvider implements AIService {
     };
     if (refs.length) jobInput.image_urls = refs;
 
-    const url = await this.kieJob(baseUrl, key, model, jobInput);
+    const url = await this.kieJob(baseUrl, key, model, jobInput, 54_000);
     return { url, provider: `kie:${model}` };
   }
 
@@ -258,19 +261,31 @@ export class RealAIProvider implements AIService {
 
     const text = input.lines.map((l) => l.text).join("\n\n").slice(0, 5000);
 
-    const url = await this.kieJob(
-      baseUrl,
-      key,
-      model,
-      { text, voice: { voice_id: voiceId } },
-      50_000,
-    );
-
-    // No duration in the response — estimate from word count (~2.5 words/sec).
-    const words = text.split(/\s+/).filter(Boolean).length;
-    const durationSeconds = Math.max(3, Math.round(words / 2.5));
-
-    return { url, provider: `kie:${model}`, durationSeconds };
+    try {
+      // TTS usually finishes in <20s; cap each try so a stuck one leaves room
+      // to retry within the route's 60s budget.
+      // Healthy TTS finishes in 5-15s. Two short tries, then give up fast so the
+      // fallback + rehost still fit inside the route's 60s budget.
+      const url = await this.kieJob(
+        baseUrl,
+        key,
+        model,
+        { text, voice: { voice_id: voiceId } },
+        34_000,
+        16_000,
+      );
+      // No duration in the response — estimate from word count (~2.5 words/sec).
+      const words = text.split(/\s+/).filter(Boolean).length;
+      const durationSeconds = Math.max(3, Math.round(words / 2.5));
+      return { url, provider: `kie:${model}`, durationSeconds };
+    } catch (err) {
+      // Kie's TTS pipeline goes down for hours at a time. Rather than block the
+      // whole wizard, fall back to the placeholder track — the route sees the
+      // "mock" provider and refunds, so the user isn't charged for it and can
+      // regenerate later.
+      console.error("TTS provider failed, falling back to placeholder:", (err as Error).message);
+      return new MockAIProvider().generateVoice(input);
+    }
   }
 
   async generateVideo(_input: GenerateVideoInput): Promise<GenerateVideoResult> {

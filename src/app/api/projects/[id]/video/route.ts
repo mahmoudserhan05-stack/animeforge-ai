@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId, getOwnedProjectOrThrow } from "@/lib/session";
 import { jsonError, handleRouteError, serializeProject, PROJECT_INCLUDE } from "@/lib/api-utils";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
+import { spendCredits, refundCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
 
 /** POST /api/projects/:id/video — assemble the final video from scenes + voice. */
@@ -81,6 +81,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       ]);
     } catch (genErr) {
       await prisma.project.update({ where: { id: project.id }, data: { status: "FAILED" } });
+      await refundCredits(userId, "video_generation", project.id);
       throw genErr;
     }
 

@@ -69,3 +69,14 @@ export async function grantCredits(userId: string, amount: number, reason: strin
     data: { userId, amount, reason },
   });
 }
+
+/**
+ * Give back what a failed AI generation charged. Call this whenever the
+ * provider errors out *after* spendCredits() has already run, so users are
+ * never billed for output they didn't get.
+ */
+export async function refundCredits(userId: string, reason: CreditReason, projectId?: string) {
+  await prisma.creditTransaction.create({
+    data: { userId, amount: CREDIT_COSTS[reason], reason: `${reason}:refund`, projectId },
+  });
+}

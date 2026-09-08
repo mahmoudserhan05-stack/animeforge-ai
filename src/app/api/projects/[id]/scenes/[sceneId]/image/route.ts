@@ -3,12 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId, getOwnedProjectOrThrow } from "@/lib/session";
 import { jsonError, handleRouteError, serializeScene } from "@/lib/api-utils";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
+import { spendCredits, refundCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
 import { persistRemoteFile } from "@/lib/storage";
 
-// Real image generation (Kie.ai nano-banana) is an async job we poll for
-// ~30s. Give the function room; 60s is the Vercel Hobby ceiling.
+// Real image generation (Kie.ai Seedream) is an async job we poll for ~30s.
+// Give the function room; 60s is the Vercel Hobby ceiling.
 export const maxDuration = 60;
 
 /** POST /api/projects/:id/scenes/:sceneId/image — generate this scene's image. */
@@ -86,6 +86,7 @@ export async function POST(
       return NextResponse.json({ scene: serializeScene(updatedScene) });
     } catch (genErr) {
       await prisma.scene.update({ where: { id: scene.id }, data: { imageStatus: "FAILED" } });
+      await refundCredits(userId, "image_generation", project.id);
       throw genErr;
     }
   } catch (err) {

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUserId, getOwnedProjectOrThrow } from "@/lib/session";
 import { jsonError, handleRouteError, serializeProject, PROJECT_INCLUDE } from "@/lib/api-utils";
 import { rateLimit, RATE_LIMITS } from "@/lib/rate-limit";
-import { spendCredits, InsufficientCreditsError } from "@/lib/credits";
+import { spendCredits, refundCredits, InsufficientCreditsError } from "@/lib/credits";
 import { getAIService } from "@/lib/ai";
 import { persistRemoteFile } from "@/lib/storage";
 import { voiceOptionsSchema } from "@/lib/validations";
@@ -49,14 +49,27 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .filter((s) => s.dialogue)
       .map((s) => ({ sceneOrder: s.order, text: s.dialogue as string }));
 
-    const gen = await ai.generateVoice({
-      lines: lines.length > 0 ? lines : scenes.map((s) => ({ sceneOrder: s.order, text: s.description })),
-      voiceId: parsed.data.voiceId,
-      language: project.language,
-    });
+    let gen;
+    try {
+      gen = await ai.generateVoice({
+        lines: lines.length > 0 ? lines : scenes.map((s) => ({ sceneOrder: s.order, text: s.description })),
+        voiceId: parsed.data.voiceId,
+        language: project.language,
+      });
+    } catch (genErr) {
+      await refundCredits(userId, "voice_generation", project.id);
+      throw genErr;
+    }
     const { provider, durationSeconds } = gen;
-    // Re-host off the provider's short-lived CDN.
-    const url = await persistRemoteFile(gen.url, `projects/${project.id}/voice`);
+    // The provider fell back to the placeholder track (real TTS was down) —
+    // don't charge for it; the user can regenerate once the provider recovers.
+    const usedFallback = provider.startsWith("mock");
+    if (usedFallback) await refundCredits(userId, "voice_generation", project.id);
+
+    // Re-host off the provider's short-lived CDN (skip for the bundled placeholder).
+    const url = usedFallback
+      ? gen.url
+      : await persistRemoteFile(gen.url, `projects/${project.id}/voice`);
 
     await prisma.$transaction([
       prisma.generatedAsset.create({
@@ -85,7 +98,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       include: PROJECT_INCLUDE,
     });
 
-    return NextResponse.json({ project: serializeProject(updated!), voiceUrl: url });
+    return NextResponse.json({
+      project: serializeProject(updated!),
+      voiceUrl: url,
+      ...(usedFallback
+        ? { warning: "تعذّر الوصول لمزوّد الصوت مؤقتًا — تم استخدام مقطع تجريبي دون خصم رصيد. أعد التوليد لاحقًا." }
+        : {}),
+    });
   } catch (err) {
     return handleRouteError(err);
   }
